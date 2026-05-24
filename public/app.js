@@ -96,6 +96,7 @@ async function loadConfig() {
 function updateProviderStatus() {
   const selected = providerSelect.value;
   const config = providerConfig[selected];
+  syncModelChoiceToProvider(selected);
   if (config?.configured) {
     providerStatus.textContent = "Live";
     providerStatus.classList.add("live");
@@ -104,6 +105,16 @@ function updateProviderStatus() {
     providerStatus.textContent = "Offline";
     providerStatus.classList.remove("live");
     providerHint.textContent = "No API key found. Jelly will use built-in F-1 questions and cross-questions.";
+  }
+}
+
+function syncModelChoiceToProvider(provider) {
+  const current = modelSelect.value;
+  if (provider === "groq" && !current.startsWith("qwen/") && !current.startsWith("llama-")) {
+    modelSelect.value = "qwen/qwen3-32b";
+  }
+  if (provider === "openrouter" && (current.startsWith("qwen/") || current.startsWith("llama-"))) {
+    modelSelect.value = "nvidia/nemotron-3-super-120b-a12b:free";
   }
 }
 

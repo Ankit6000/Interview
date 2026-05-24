@@ -17,14 +17,16 @@ The app works without an API key using an offline question engine.
 For AI responses, set one of these environment variables before running:
 
 ```powershell
-$env:OPENROUTER_API_KEY="your_key"
-$env:OPENROUTER_MODEL="nvidia/nemotron-3-super-120b-a12b:free"
+$env:GROQ_API_KEY="your_key"
+$env:GROQ_MODEL="qwen/qwen3-32b"
 npm start
 ```
 
 Or create a private `.env` file:
 
 ```env
+GROQ_API_KEY=your_groq_key
+GROQ_MODEL=qwen/qwen3-32b
 OPENROUTER_API_KEY=your_key
 OPENROUTER_MODEL=nvidia/nemotron-3-super-120b-a12b:free
 GEMINI_API_KEY=your_google_ai_studio_key
@@ -37,11 +39,11 @@ OpenRouter free model availability changes. If `deepseek/deepseek-r1:free` is un
 
 Recommended free model order for this app:
 
-1. `nvidia/nemotron-3-super-120b-a12b:free`
-2. `deepseek/deepseek-v4-flash:free`
-3. `deepseek/deepseek-r1:free`
-4. `openai/gpt-oss-120b:free`
-5. `openrouter/free`
+1. Groq `qwen/qwen3-32b`
+2. Groq `llama-3.3-70b-versatile`
+3. OpenRouter `nvidia/nemotron-3-super-120b-a12b:free`
+4. OpenRouter `deepseek/deepseek-r1:free`
+5. OpenRouter `openrouter/free`
 
 ## Voice Mode
 
