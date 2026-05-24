@@ -6,6 +6,8 @@ loadEnvFile(path.join(__dirname, ".env"));
 
 const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(__dirname, "public");
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_TRANSCRIBE_MODEL = process.env.GEMINI_TRANSCRIBE_MODEL || "gemini-2.5-flash";
 
 const providerConfigs = {
   openrouter: {
@@ -78,7 +80,7 @@ function readBody(req) {
     let data = "";
     req.on("data", chunk => {
       data += chunk;
-      if (data.length > 1_000_000) {
+      if (data.length > 12_000_000) {
         reject(new Error("Request body is too large."));
         req.destroy();
       }
@@ -204,6 +206,62 @@ async function callModel(payload) {
   };
 }
 
+async function transcribeWithGemini(payload) {
+  if (!GEMINI_API_KEY) {
+    throw new Error("Gemini listening is not configured. Add GEMINI_API_KEY to .env.");
+  }
+
+  const audioBase64 = payload.audioBase64;
+  const mimeType = payload.mimeType || "audio/webm";
+  if (!audioBase64) {
+    throw new Error("No audio was received.");
+  }
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_TRANSCRIBE_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          {
+            role: "user",
+            parts: [
+              {
+                text:
+                  "Transcribe this F-1 visa interview answer. The speaker may have an Indian accent and may mention universities, sponsors, I-20, SEVIS, visa, funding, courses, or US cities. Return only the corrected transcript in first person. Do not add explanations."
+              },
+              {
+                inline_data: {
+                  mime_type: mimeType,
+                  data: audioBase64
+                }
+              }
+            ]
+          }
+        ],
+        generationConfig: {
+          temperature: 0.1,
+          maxOutputTokens: 512
+        }
+      })
+    }
+  );
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Gemini transcription error ${response.status}: ${text.slice(0, 500)}`);
+  }
+
+  const json = await response.json();
+  const transcript = json.candidates?.[0]?.content?.parts?.map(part => part.text || "").join(" ").trim();
+  if (!transcript) {
+    throw new Error("Gemini could not hear a clear answer.");
+  }
+
+  return transcript.replace(/^["']|["']$/g, "").trim();
+}
+
 const offlineQuestions = [
   "Why did you choose this university instead of a similar university in your home country?",
   "Why this specific program, and how does it connect to your past education?",
@@ -272,8 +330,26 @@ const server = http.createServer(async (req, res) => {
             model: config.model
           }
         ])
-      )
+      ),
+      listening: {
+        configured: Boolean(GEMINI_API_KEY),
+        model: GEMINI_TRANSCRIBE_MODEL
+      }
     });
+    return;
+  }
+
+  if (req.method === "POST" && req.url.startsWith("/api/transcribe")) {
+    try {
+      const body = await readBody(req);
+      const payload = JSON.parse(body || "{}");
+      const transcript = await transcribeWithGemini(payload);
+      sendJson(res, 200, { transcript });
+    } catch (error) {
+      sendJson(res, 500, {
+        error: error.message || "Unexpected transcription error."
+      });
+    }
     return;
   }
 

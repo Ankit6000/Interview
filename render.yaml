@@ -10,3 +10,7 @@ services:
         sync: false
       - key: OPENROUTER_MODEL
         value: nvidia/nemotron-3-super-120b-a12b:free
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_TRANSCRIBE_MODEL
+        value: gemini-2.5-flash

@@ -24,6 +24,11 @@ let recognition = null;
 let isListening = false;
 let shouldSpeak = true;
 let availableVoices = [];
+let useAiListening = false;
+let mediaRecorder = null;
+let mediaStream = null;
+let audioChunks = [];
+let sendAfterTranscription = false;
 
 const welcome = "Good morning. I am Jelly. Please pass me your I-20 and passport. First question: why are you going to the United States?";
 
@@ -62,11 +67,15 @@ function updateMetrics() {
 async function loadConfig() {
   try {
     const response = await fetch("/api/config");
-    providerConfig = (await response.json()).providers || {};
+    const config = await response.json();
+    providerConfig = config.providers || {};
+    useAiListening = Boolean(config.listening?.configured && navigator.mediaDevices && window.MediaRecorder);
   } catch {
     providerConfig = {};
+    useAiListening = false;
   }
   updateProviderStatus();
+  updateListeningStatus();
 }
 
 function updateProviderStatus() {
@@ -85,6 +94,10 @@ function updateProviderStatus() {
 
 async function sendToJelly(text) {
   const trimmed = text.trim();
+  if (isListening) {
+    stopListening("Transcribing", true);
+    return;
+  }
   if (!trimmed) return;
 
   stopListening("Mic paused");
@@ -221,6 +234,11 @@ function cleanSpokenText(text) {
 }
 
 function setupSpeechRecognition() {
+  if (useAiListening) {
+    updateListeningStatus();
+    return;
+  }
+
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition) {
     micButton.disabled = true;
@@ -264,13 +282,142 @@ function setupSpeechRecognition() {
   };
 }
 
-function stopListening(statusText = "Mic ready") {
+function updateListeningStatus() {
+  if (useAiListening) {
+    micButton.disabled = false;
+    micButton.textContent = "Start AI listening";
+    voiceStatus.textContent = "Gemini listening ready";
+  }
+}
+
+function pickAudioMimeType() {
+  const types = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/ogg;codecs=opus",
+    "audio/ogg"
+  ];
+  return types.find(type => MediaRecorder.isTypeSupported(type)) || "";
+}
+
+async function startAiListening() {
+  try {
+    window.speechSynthesis?.cancel();
+    audioChunks = [];
+    sendAfterTranscription = false;
+    mediaStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      }
+    });
+
+    const mimeType = pickAudioMimeType();
+    mediaRecorder = new MediaRecorder(mediaStream, mimeType ? { mimeType } : undefined);
+    mediaRecorder.ondataavailable = event => {
+      if (event.data.size > 0) {
+        audioChunks.push(event.data);
+      }
+    };
+    mediaRecorder.onstop = () => {
+      const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType || "audio/webm" });
+      cleanupMediaStream();
+      transcribeAudio(blob, sendAfterTranscription);
+    };
+    mediaRecorder.start();
+    isListening = true;
+    micButton.textContent = "Stop and transcribe";
+    micButton.classList.add("recording");
+    voiceStatus.textContent = "AI listening";
+  } catch (error) {
+    voiceStatus.textContent = "Mic permission blocked";
+    addMessage("system", error.message || "Could not start microphone.");
+  }
+}
+
+function cleanupMediaStream() {
+  if (mediaStream) {
+    mediaStream.getTracks().forEach(track => track.stop());
+  }
+  mediaStream = null;
+}
+
+function stopAiListening(statusText = "Transcribing", autoSend = false) {
+  if (!mediaRecorder || mediaRecorder.state === "inactive") return;
+  sendAfterTranscription = autoSend;
+  voiceStatus.textContent = statusText;
+  micButton.textContent = "Transcribing";
+  micButton.classList.remove("recording");
+  isListening = false;
+  mediaRecorder.stop();
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(String(reader.result).split(",")[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function transcribeAudio(blob, autoSend) {
+  if (blob.size < 1200) {
+    voiceStatus.textContent = "No clear audio";
+    micButton.textContent = "Start AI listening";
+    return;
+  }
+
+  try {
+    const audioBase64 = await blobToBase64(blob);
+    const response = await fetch("/api/transcribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mimeType: blob.type || "audio/webm",
+        audioBase64
+      })
+    });
+    const data = await response.json();
+    if (!response.ok || data.error) {
+      throw new Error(data.error || "AI listening failed.");
+    }
+
+    const transcript = data.transcript.trim();
+    messageInput.value = transcript;
+    voiceStatus.textContent = "Transcript ready";
+    if (autoSend) {
+      sendToJelly(transcript);
+    }
+  } catch (error) {
+    voiceStatus.textContent = "AI listening failed";
+    addMessage("system", error.message);
+  } finally {
+    micButton.textContent = "Start AI listening";
+  }
+}
+
+function stopListening(statusText = "Mic ready", autoSend = false) {
+  if (useAiListening) {
+    stopAiListening(statusText, autoSend);
+    return;
+  }
   if (!recognition || !isListening) return;
   voiceStatus.textContent = statusText;
   recognition.stop();
 }
 
 function toggleListening() {
+  if (useAiListening) {
+    if (isListening) {
+      stopAiListening();
+    } else {
+      startAiListening();
+    }
+    return;
+  }
+
   if (!recognition) return;
   if (isListening) {
     stopListening();
@@ -298,6 +445,10 @@ function resetSession() {
 
 chatForm.addEventListener("submit", event => {
   event.preventDefault();
+  if (isListening) {
+    stopListening("Transcribing", true);
+    return;
+  }
   stopListening("Mic paused");
   sendToJelly(messageInput.value);
 });
@@ -305,6 +456,10 @@ chatForm.addEventListener("submit", event => {
 messageInput.addEventListener("keydown", event => {
   if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
     event.preventDefault();
+    if (isListening) {
+      stopListening("Transcribing", true);
+      return;
+    }
     stopListening("Mic paused");
     sendToJelly(messageInput.value);
   }
