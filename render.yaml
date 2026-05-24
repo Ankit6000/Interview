@@ -9,7 +9,9 @@ services:
       - key: GROQ_API_KEY
         sync: false
       - key: GROQ_MODEL
-        value: deepseek-r1-distill-llama-70b
+        value: llama-3.3-70b-versatile
+      - key: GROQ_FALLBACK_MODELS
+        value: llama-3.3-70b-versatile,deepseek-r1-distill-qwen-32b,qwen/qwen3-32b
       - key: OPENROUTER_API_KEY
         sync: false
       - key: OPENROUTER_MODEL

@@ -15,12 +15,19 @@ const GEMINI_TRANSCRIBE_MODELS = (
   .split(",")
   .map(model => model.trim())
   .filter(Boolean);
+const GROQ_FALLBACK_MODELS = (
+  process.env.GROQ_FALLBACK_MODELS ||
+  "llama-3.3-70b-versatile,deepseek-r1-distill-qwen-32b,qwen/qwen3-32b"
+)
+  .split(",")
+  .map(model => model.trim())
+  .filter(Boolean);
 
 const providerConfigs = {
   groq: {
     baseUrl: process.env.GROQ_BASE_URL || "https://api.groq.com/openai/v1/chat/completions",
     apiKey: process.env.GROQ_API_KEY,
-    model: process.env.GROQ_MODEL || "deepseek-r1-distill-llama-70b",
+    model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
     headers: {}
   },
   openrouter: {
@@ -223,38 +230,27 @@ async function callModel(payload) {
     };
   }
 
-  const response = await fetch(config.baseUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${config.apiKey}`,
-      ...config.headers
-    },
-    body: JSON.stringify({
-      model: payload.model || config.model,
-      temperature: 0.55,
-      messages: [
-        { role: "system", content: buildSystemPrompt(payload.profile || {}) },
-        ...(payload.messages || []).slice(-18)
-      ]
-    })
-  });
+  const request = {
+    temperature: 0.55,
+    messages: [
+      { role: "system", content: buildSystemPrompt(payload.profile || {}) },
+      ...(payload.messages || []).slice(-18)
+    ]
+  };
 
-  if (!response.ok) {
-    const text = await response.text();
-    if (isQuotaOrRateLimitError(response.status, text)) {
-      return {
-        offline: true,
-        quotaLimited: true,
-        message: makeOfflineResponse(payload)
-      };
-    }
-    throw new Error(cleanProviderError(response.status, text));
+  const { json, fallbackModel, quotaLimited } = await callChatCompletionWithFallback(config, payload, request);
+
+  if (quotaLimited) {
+    return {
+      offline: true,
+      quotaLimited: true,
+      message: makeOfflineResponse(payload)
+    };
   }
 
-  const json = await response.json();
   return {
     offline: false,
+    fallbackModel,
     message: json.choices?.[0]?.message?.content || "I could not generate the next question. Please try again."
   };
 }
@@ -267,35 +263,75 @@ async function callReviewModel(payload) {
     return makeOfflineReview(payload);
   }
 
-  const response = await fetch(config.baseUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${config.apiKey}`,
-      ...config.headers
-    },
-    body: JSON.stringify({
-      model: payload.model || config.model,
-      temperature: 0.35,
-      max_tokens: 1800,
-      messages: [
-        { role: "system", content: buildReviewPrompt(payload.profile || {}) },
-        ...(payload.messages || []).slice(-28),
-        { role: "user", content: "End the interview now and provide the full review." }
-      ]
-    })
-  });
+  const request = {
+    temperature: 0.35,
+    max_tokens: 1800,
+    messages: [
+      { role: "system", content: buildReviewPrompt(payload.profile || {}) },
+      ...(payload.messages || []).slice(-28),
+      { role: "user", content: "End the interview now and provide the full review." }
+    ]
+  };
 
-  if (!response.ok) {
-    const text = await response.text();
-    if (isQuotaOrRateLimitError(response.status, text)) {
-      return makeOfflineReview(payload);
-    }
-    throw new Error(cleanProviderError(response.status, text));
+  const { json, quotaLimited } = await callChatCompletionWithFallback(config, payload, request);
+
+  if (quotaLimited) {
+    return makeOfflineReview(payload);
   }
 
-  const json = await response.json();
   return json.choices?.[0]?.message?.content || makeOfflineReview(payload);
+}
+
+async function callChatCompletionWithFallback(config, payload, request) {
+  const models = getCandidateModels(payload.provider, payload.model || config.model, config.model);
+  let lastError = "";
+
+  for (const model of models) {
+    const response = await fetch(config.baseUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${config.apiKey}`,
+        ...config.headers
+      },
+      body: JSON.stringify({
+        ...request,
+        model
+      })
+    });
+
+    if (response.ok) {
+      return {
+        json: await response.json(),
+        fallbackModel: model !== (payload.model || config.model) ? model : undefined,
+        quotaLimited: false
+      };
+    }
+
+    const text = await response.text();
+    if (isQuotaOrRateLimitError(response.status, text)) {
+      return { json: null, quotaLimited: true };
+    }
+
+    lastError = cleanProviderError(response.status, text);
+    if (!shouldTryNextModel(response.status, text)) {
+      throw new Error(lastError);
+    }
+  }
+
+  throw new Error(lastError || "No available model could answer right now.");
+}
+
+function getCandidateModels(providerName, selectedModel, defaultModel) {
+  const models = [selectedModel, defaultModel];
+  if (providerName === "groq") {
+    models.push(...GROQ_FALLBACK_MODELS);
+  }
+  return [...new Set(models.filter(Boolean))];
+}
+
+function shouldTryNextModel(status, text) {
+  return status === 400 && /model|decommission|not.*support|invalid|does not exist|not found/i.test(text);
 }
 
 async function transcribeWithGemini(payload) {
@@ -477,7 +513,8 @@ const server = http.createServer(async (req, res) => {
           name,
           {
             configured: Boolean(config.apiKey),
-            model: config.model
+            model: config.model,
+            fallbackModels: name === "groq" ? GROQ_FALLBACK_MODELS : undefined
           }
         ])
       ),

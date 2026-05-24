@@ -113,11 +113,12 @@ function syncModelChoiceToProvider(provider) {
   const isGroqModel =
     current.startsWith("qwen/") ||
     current.startsWith("llama-") ||
+    current === "deepseek-r1-distill-qwen-32b" ||
     current === "deepseek-r1-distill-llama-70b" ||
     current === "openai/gpt-oss-120b";
 
   if (provider === "groq" && !isGroqModel) {
-    modelSelect.value = "deepseek-r1-distill-llama-70b";
+    modelSelect.value = "llama-3.3-70b-versatile";
   }
   if (provider === "openrouter" && isGroqModel) {
     modelSelect.value = "nvidia/nemotron-3-super-120b-a12b:free";
@@ -176,6 +177,9 @@ async function sendToJelly(text) {
     const reply = data.message;
     messages.push({ role: "assistant", content: reply });
     addMessage("assistant", reply);
+    if (data.fallbackModel) {
+      addMessage("system", `Selected model was unavailable, so Jelly used ${data.fallbackModel}.`);
+    }
     if (data.quotaLimited) {
       addMessage("system", "Free AI quota is exhausted for now. Jelly switched to built-in practice mode.");
     }
