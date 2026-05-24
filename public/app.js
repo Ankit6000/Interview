@@ -130,6 +130,13 @@ async function sendToJelly(text) {
   addMessage("user", trimmed);
   updateMetrics();
   messageInput.value = "";
+
+  if (isStopIntent(trimmed)) {
+    addMessage("system", "Interview ended by student request. Jelly is preparing your review.");
+    await endInterview({ skipNotice: true });
+    return;
+  }
+
   setLoading(true);
 
   try {
@@ -152,6 +159,9 @@ async function sendToJelly(text) {
     const reply = data.message;
     messages.push({ role: "assistant", content: reply });
     addMessage("assistant", reply);
+    if (data.quotaLimited) {
+      addMessage("system", "Free AI quota is exhausted for now. Jelly switched to built-in practice mode.");
+    }
     if (data.offline) {
       providerStatus.textContent = "Offline";
       providerStatus.classList.remove("live");
@@ -162,6 +172,14 @@ async function sendToJelly(text) {
     setLoading(false);
     updateMetrics();
   }
+}
+
+function isStopIntent(text) {
+  return (
+    /\b(stop|end|quit|finish|done)\b/i.test(text) ||
+    /don'?t want to continue/i.test(text) ||
+    /\bno\b.*\bcontinue\b/i.test(text)
+  );
 }
 
 function startInterview() {
@@ -199,7 +217,7 @@ function pickOpeningQuestion() {
   return pool[randomIndex];
 }
 
-async function endInterview() {
+async function endInterview(options = {}) {
   if (interviewEnded) return;
 
   const answerCount = messages.filter(message => message.role === "user").length;
@@ -214,7 +232,9 @@ async function endInterview() {
   setLoading(true);
   endInterviewButton.disabled = true;
   endInterviewButton.textContent = "Reviewing";
-  addMessage("system", "Interview ended. Jelly is preparing your full review.");
+  if (!options.skipNotice) {
+    addMessage("system", "Interview ended. Jelly is preparing your full review.");
+  }
 
   try {
     const response = await fetch("/api/review", {

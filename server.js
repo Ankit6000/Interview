@@ -236,7 +236,14 @@ async function callModel(payload) {
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`Provider error ${response.status}: ${text.slice(0, 500)}`);
+    if (isQuotaOrRateLimitError(response.status, text)) {
+      return {
+        offline: true,
+        quotaLimited: true,
+        message: makeOfflineResponse(payload)
+      };
+    }
+    throw new Error(cleanProviderError(response.status, text));
   }
 
   const json = await response.json();
@@ -275,7 +282,10 @@ async function callReviewModel(payload) {
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`Provider error ${response.status}: ${text.slice(0, 500)}`);
+    if (isQuotaOrRateLimitError(response.status, text)) {
+      return makeOfflineReview(payload);
+    }
+    throw new Error(cleanProviderError(response.status, text));
   }
 
   const json = await response.json();
@@ -402,6 +412,26 @@ function makeOfflineResponse(payload) {
   }
 
   return offlineQuestions[studentAnswers % offlineQuestions.length];
+}
+
+function isQuotaOrRateLimitError(status, text) {
+  return (
+    status === 429 ||
+    status === 402 ||
+    /rate limit|quota|free-models-per-day|insufficient_quota|out of credits/i.test(text)
+  );
+}
+
+function cleanProviderError(status, text) {
+  if (isQuotaOrRateLimitError(status, text)) {
+    return "The free AI quota is temporarily exhausted. Jelly will continue with built-in practice questions.";
+  }
+
+  if (status === 401 || status === 403) {
+    return "The AI provider key was rejected. Please check the server environment variables.";
+  }
+
+  return `The AI provider returned an error (${status}). Please try again.`;
 }
 
 function makeOfflineReview(payload) {
