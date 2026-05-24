@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: jelly-f1-interview-coach
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: OPENROUTER_MODEL
+        value: nvidia/nemotron-3-super-120b-a12b:free

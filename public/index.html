@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Jelly F-1 Interview Coach</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Public+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="sidebar" aria-label="Student profile">
+        <div class="brand">
+          <div class="mark">J</div>
+          <div>
+            <p class="eyebrow">F-1 practice officer</p>
+            <h1>Jelly</h1>
+          </div>
+        </div>
+
+        <form id="profileForm" class="profile-grid">
+          <label>
+            Student name
+            <input name="name" placeholder="Aisha Sharma" autocomplete="name" />
+          </label>
+          <label>
+            University
+            <input name="university" placeholder="Arizona State University" />
+          </label>
+          <label>
+            Program
+            <input name="program" placeholder="MS Computer Science" />
+          </label>
+          <label>
+            Degree level
+            <select name="degreeLevel">
+              <option>Master's</option>
+              <option>Bachelor's</option>
+              <option>PhD</option>
+              <option>Associate</option>
+              <option>Certificate</option>
+            </select>
+          </label>
+          <label>
+            Intake
+            <input name="intake" placeholder="Fall 2026" />
+          </label>
+          <label>
+            Funding source
+            <input name="funding" placeholder="Family savings + education loan" />
+          </label>
+          <label>
+            Sponsor
+            <input name="sponsor" placeholder="Father, business owner" />
+          </label>
+          <label>
+            Home city/country
+            <input name="home" placeholder="Delhi, India" />
+          </label>
+          <label class="wide">
+            Career goal
+            <textarea name="goal" rows="3" placeholder="Return to India and work as a data engineer in fintech."></textarea>
+          </label>
+          <label class="wide">
+            Background
+            <textarea name="background" rows="3" placeholder="B.Tech IT, 8.4 CGPA, internship at..."></textarea>
+          </label>
+        </form>
+
+        <div class="provider-panel">
+          <p class="panel-title">AI provider</p>
+          <div class="provider-row">
+            <select id="provider">
+              <option value="openrouter">OpenRouter DeepSeek</option>
+              <option value="deepseek">DeepSeek official</option>
+              <option value="xai">xAI Grok</option>
+            </select>
+            <span id="providerStatus" class="status">Checking</span>
+          </div>
+          <label class="model-picker">
+            Model
+            <select id="model">
+              <option value="nvidia/nemotron-3-super-120b-a12b:free">NVIDIA Nemotron 3 Super free</option>
+              <option value="deepseek/deepseek-v4-flash:free">DeepSeek V4 Flash free</option>
+              <option value="deepseek/deepseek-r1:free">DeepSeek R1 free</option>
+              <option value="openai/gpt-oss-120b:free">OpenAI GPT-OSS 120B free</option>
+              <option value="openrouter/free">OpenRouter auto free</option>
+            </select>
+          </label>
+          <p id="providerHint" class="hint">No API key still works with offline practice questions.</p>
+        </div>
+
+        <div class="voice-panel">
+          <p class="panel-title">Jelly voice</p>
+          <label>
+            Voice
+            <select id="voiceSelect">
+              <option>Loading voices...</option>
+            </select>
+          </label>
+          <div class="voice-controls">
+            <label>
+              Speed
+              <input id="voiceRate" type="range" min="0.75" max="1.15" value="0.9" step="0.01" />
+            </label>
+            <label>
+              Tone
+              <input id="voicePitch" type="range" min="0.8" max="1.15" value="0.98" step="0.01" />
+            </label>
+          </div>
+          <button type="button" id="testVoiceButton" class="ghost test-voice">Test voice</button>
+          <p class="hint">For a more natural free voice, try Microsoft Edge and choose a Microsoft natural voice if it appears here.</p>
+        </div>
+      </section>
+
+      <section class="interview" aria-label="Interview session">
+        <header class="interview-header">
+          <div>
+            <p class="eyebrow">Consular window 03</p>
+            <h2>Practice interview</h2>
+          </div>
+          <div class="metrics" aria-label="Session metrics">
+            <div>
+              <span id="answerCount">0</span>
+              <small>answers</small>
+            </div>
+            <div>
+              <span id="riskLevel">Warmup</span>
+              <small>pressure</small>
+            </div>
+          </div>
+        </header>
+
+        <div id="chat" class="chat" aria-live="polite"></div>
+
+        <div class="quick-panel" aria-label="Quick practice controls">
+          <button class="chip" data-prompt="Please start the F-1 visa interview.">Start interview</button>
+          <button class="chip" data-prompt="Ask me a difficult cross-question based on my last answer.">Cross-question me</button>
+          <button class="chip" data-prompt="Give feedback on my last answer and then ask the next question.">Feedback</button>
+          <button class="chip" data-prompt="Run a rapid-fire round with short visa officer questions.">Rapid fire</button>
+          <button class="chip voice-chip active" id="speakToggle" type="button">Jelly voice on</button>
+        </div>
+
+        <form id="chatForm" class="composer">
+          <textarea id="messageInput" rows="3" placeholder="Type your answer like you are standing at the visa window..."></textarea>
+          <div class="composer-actions">
+            <span id="voiceStatus" class="voice-status">Mic ready</span>
+            <button type="button" id="micButton" class="ghost mic-button">Start speaking</button>
+            <button type="button" id="resetButton" class="ghost">Reset</button>
+            <button type="submit" class="primary">Send answer</button>
+          </div>
+        </form>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

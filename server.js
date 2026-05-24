@@ -1,0 +1,299 @@
+const http = require("http");
+const fs = require("fs");
+const path = require("path");
+
+loadEnvFile(path.join(__dirname, ".env"));
+
+const PORT = Number(process.env.PORT || 3000);
+const PUBLIC_DIR = path.join(__dirname, "public");
+
+const providerConfigs = {
+  openrouter: {
+    baseUrl: process.env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1/chat/completions",
+    apiKey: process.env.OPENROUTER_API_KEY,
+    model: process.env.OPENROUTER_MODEL || "nvidia/nemotron-3-super-120b-a12b:free",
+    headers: {
+      "HTTP-Referer": process.env.APP_URL || `http://localhost:${PORT}`,
+      "X-Title": "Jelly F1 Interview Coach"
+    }
+  },
+  deepseek: {
+    baseUrl: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com/chat/completions",
+    apiKey: process.env.DEEPSEEK_API_KEY,
+    model: process.env.DEEPSEEK_MODEL || "deepseek-chat",
+    headers: {}
+  },
+  xai: {
+    baseUrl: process.env.XAI_BASE_URL || "https://api.x.ai/v1/chat/completions",
+    apiKey: process.env.XAI_API_KEY,
+    model: process.env.XAI_MODEL || "grok-4.1-fast",
+    headers: {}
+  }
+};
+
+const mimeTypes = {
+  ".html": "text/html; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+  ".js": "application/javascript; charset=utf-8",
+  ".json": "application/json; charset=utf-8",
+  ".svg": "image/svg+xml",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg"
+};
+
+function loadEnvFile(filePath) {
+  if (!fs.existsSync(filePath)) return;
+
+  const content = fs.readFileSync(filePath, "utf8");
+  for (const line of content.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+
+    const separatorIndex = trimmed.indexOf("=");
+    if (separatorIndex === -1) continue;
+
+    const key = trimmed.slice(0, separatorIndex).trim();
+    let value = trimmed.slice(separatorIndex + 1).trim();
+    if (
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"))
+    ) {
+      value = value.slice(1, -1);
+    }
+
+    if (key && process.env[key] === undefined) {
+      process.env[key] = value;
+    }
+  }
+}
+
+function sendJson(res, status, body) {
+  res.writeHead(status, { "Content-Type": "application/json; charset=utf-8" });
+  res.end(JSON.stringify(body));
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let data = "";
+    req.on("data", chunk => {
+      data += chunk;
+      if (data.length > 1_000_000) {
+        reject(new Error("Request body is too large."));
+        req.destroy();
+      }
+    });
+    req.on("end", () => resolve(data));
+    req.on("error", reject);
+  });
+}
+
+function safeJoin(base, target) {
+  const targetPath = path.normalize(path.join(base, target));
+  return targetPath.startsWith(base) ? targetPath : null;
+}
+
+function serveStatic(req, res) {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const requestedPath = url.pathname === "/" ? "/index.html" : decodeURIComponent(url.pathname);
+  const filePath = safeJoin(PUBLIC_DIR, requestedPath);
+
+  if (!filePath) {
+    res.writeHead(403);
+    res.end("Forbidden");
+    return;
+  }
+
+  fs.readFile(filePath, (err, content) => {
+    if (err) {
+      res.writeHead(404);
+      res.end("Not found");
+      return;
+    }
+
+    const ext = path.extname(filePath).toLowerCase();
+    res.writeHead(200, {
+      "Content-Type": mimeTypes[ext] || "application/octet-stream",
+      "Cache-Control": "no-store"
+    });
+    res.end(content);
+  });
+}
+
+function buildSystemPrompt(profile) {
+  return `You are Jelly, a realistic F-1 student visa interview practice officer.
+
+Your job is interview practice, not legal advice. Be professional, concise, and a little strict. Ask one question at a time. Use the student's answers to ask probing follow-up questions, cross-questions, and consistency checks.
+
+Interview goals:
+- Check genuine student intent.
+- Check program, university, and academic preparedness.
+- Check funding clarity and sponsor credibility.
+- Check ties to the home country and post-study plans.
+- Check SEVIS/I-20 awareness, living plans, and basic visa readiness.
+
+Question style:
+- Start with direct F-1 visa interview questions.
+- Start the session with standard static questions about purpose, university, program, funding, and return plans.
+- After the warmup, freely choose the best next move: a standard question, a cross-question, a rapid-fire mini round, or a document/consistency check.
+- Ask complex cross-questions whenever answers are vague, memorized, contradictory, too broad, or sound rehearsed.
+- Use rapid-fire rounds occasionally: ask 2-3 short questions in one turn when the student is doing well or needs pressure practice.
+- Keep each response short and interview-like.
+- Do not reveal your scoring rubric, hidden reasoning, analysis, or labels like "Reason", "Static", "Cross-question", or "Rapid-fire" unless the student explicitly asks for feedback.
+- Do not put stage directions, explanations, or non-spoken notes in parentheses or markdown.
+- Do not guarantee approval or denial.
+- After every 5 student answers, provide a quick score out of 10, risks, and the next question.
+- If the student asks for feedback, give specific improvements and a stronger sample answer.
+
+Student profile:
+Name: ${profile.name || "Not provided"}
+University: ${profile.university || "Not provided"}
+Program: ${profile.program || "Not provided"}
+Degree level: ${profile.degreeLevel || "Not provided"}
+Intake: ${profile.intake || "Not provided"}
+Funding source: ${profile.funding || "Not provided"}
+Sponsor: ${profile.sponsor || "Not provided"}
+Home country/city: ${profile.home || "Not provided"}
+Career goal: ${profile.goal || "Not provided"}
+Prior education/work: ${profile.background || "Not provided"}
+
+Begin or continue the interview naturally.`;
+}
+
+async function callModel(payload) {
+  const providerName = payload.provider || "openrouter";
+  const config = providerConfigs[providerName];
+
+  if (!config) {
+    throw new Error("Unknown provider.");
+  }
+
+  if (!config.apiKey) {
+    return {
+      offline: true,
+      message: makeOfflineResponse(payload)
+    };
+  }
+
+  const response = await fetch(config.baseUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${config.apiKey}`,
+      ...config.headers
+    },
+    body: JSON.stringify({
+      model: payload.model || config.model,
+      temperature: 0.55,
+      messages: [
+        { role: "system", content: buildSystemPrompt(payload.profile || {}) },
+        ...(payload.messages || []).slice(-18)
+      ]
+    })
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Provider error ${response.status}: ${text.slice(0, 500)}`);
+  }
+
+  const json = await response.json();
+  return {
+    offline: false,
+    message: json.choices?.[0]?.message?.content || "I could not generate the next question. Please try again."
+  };
+}
+
+const offlineQuestions = [
+  "Why did you choose this university instead of a similar university in your home country?",
+  "Why this specific program, and how does it connect to your past education?",
+  "Who is paying for your studies, and what is their annual income?",
+  "Can you explain your total first-year cost from the I-20 and how it will be covered?",
+  "What other universities admitted or rejected you, and why did you choose this one?",
+  "What will you do after graduation?",
+  "Why should I believe you will return home after your studies?",
+  "If you get a good job offer in the USA after graduation, what will you do?",
+  "What subjects will you study in your first semester?",
+  "Where will you live, and how much will it cost?",
+  "What does your sponsor do, and why are they willing to fund you?",
+  "Why not study in Canada, the UK, Australia, or your home country?",
+  "How did you learn about this university?",
+  "What is your backup plan if your visa is refused?",
+  "Tell me about your academic gap or work experience, if any."
+];
+
+const crossQuestions = [
+  "You said that earlier, but give me one specific example that proves it.",
+  "That sounds memorized. Can you explain it in simpler words?",
+  "Why is this answer not just a reason to immigrate permanently?",
+  "What document can support what you just said?",
+  "If your sponsor has other responsibilities, how can they afford this?",
+  "How exactly will this degree help you in your home country?",
+  "What makes this university stronger for your goal than the cheaper option?",
+  "Your answer is broad. Name one course, professor, lab, or career outcome."
+];
+
+const rapidFireRounds = [
+  "Quick round. What is your university name? What is your program? When does your course start?",
+  "Rapid fire. Who is your sponsor? What is your first-year cost? How will you pay the second year?",
+  "Short answers only. Why this university? Why this program? What will you do after graduation?",
+  "Pressure round. What is your SEVIS fee status? Where will you live? Name one subject in your first semester."
+];
+
+function makeOfflineResponse(payload) {
+  const messages = payload.messages || [];
+  const studentAnswers = messages.filter(message => message.role === "user").length;
+  const lastAnswer = [...messages].reverse().find(message => message.role === "user")?.content || "";
+  const needsCross = lastAnswer.length < 80 || /\b(good|best|better|opportunity|future|dream|because|usa)\b/i.test(lastAnswer);
+
+  if (studentAnswers > 0 && studentAnswers % 5 === 0) {
+    return `Quick checkpoint: ${Math.max(5, Math.min(8, 10 - Math.floor(lastAnswer.length < 80 ? 2 : 0)))}/10. Main risk: your answers must be specific, document-backed, and connected to returning home. Next question: ${offlineQuestions[studentAnswers % offlineQuestions.length]}`;
+  }
+
+  if (studentAnswers > 2 && studentAnswers % 4 === 0) {
+    return rapidFireRounds[studentAnswers % rapidFireRounds.length];
+  }
+
+  if (studentAnswers > 1 && needsCross) {
+    return crossQuestions[studentAnswers % crossQuestions.length];
+  }
+
+  return offlineQuestions[studentAnswers % offlineQuestions.length];
+}
+
+const server = http.createServer(async (req, res) => {
+  if (req.method === "GET" && req.url.startsWith("/api/config")) {
+    sendJson(res, 200, {
+      providers: Object.fromEntries(
+        Object.entries(providerConfigs).map(([name, config]) => [
+          name,
+          {
+            configured: Boolean(config.apiKey),
+            model: config.model
+          }
+        ])
+      )
+    });
+    return;
+  }
+
+  if (req.method === "POST" && req.url.startsWith("/api/chat")) {
+    try {
+      const body = await readBody(req);
+      const payload = JSON.parse(body || "{}");
+      const result = await callModel(payload);
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 500, {
+        error: error.message || "Unexpected server error."
+      });
+    }
+    return;
+  }
+
+  serveStatic(req, res);
+});
+
+server.listen(PORT, () => {
+  console.log(`Jelly is running at http://localhost:${PORT}`);
+});
