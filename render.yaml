@@ -12,5 +12,5 @@ services:
         value: nvidia/nemotron-3-super-120b-a12b:free
       - key: GEMINI_API_KEY
         sync: false
-      - key: GEMINI_TRANSCRIBE_MODEL
-        value: gemini-2.5-flash
+      - key: GEMINI_TRANSCRIBE_MODELS
+        value: gemini-3.1-flash-lite-preview,gemini-2.5-flash-lite,gemini-2.5-flash

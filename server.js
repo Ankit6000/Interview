@@ -7,7 +7,14 @@ loadEnvFile(path.join(__dirname, ".env"));
 const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(__dirname, "public");
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const GEMINI_TRANSCRIBE_MODEL = process.env.GEMINI_TRANSCRIBE_MODEL || "gemini-2.5-flash";
+const GEMINI_TRANSCRIBE_MODELS = (
+  process.env.GEMINI_TRANSCRIBE_MODELS ||
+  process.env.GEMINI_TRANSCRIBE_MODEL ||
+  "gemini-3.1-flash-lite-preview,gemini-2.5-flash-lite,gemini-2.5-flash"
+)
+  .split(",")
+  .map(model => model.trim())
+  .filter(Boolean);
 
 const providerConfigs = {
   openrouter: {
@@ -286,49 +293,62 @@ async function transcribeWithGemini(payload) {
     throw new Error("No audio was received.");
   }
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_TRANSCRIBE_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [
+  const requestBody = JSON.stringify({
+    contents: [
+      {
+        role: "user",
+        parts: [
           {
-            role: "user",
-            parts: [
-              {
-                text:
-                  "Transcribe this F-1 visa interview answer. The speaker may have an Indian accent and may mention universities, sponsors, I-20, SEVIS, visa, funding, courses, or US cities. Return only the corrected transcript in first person. Do not add explanations."
-              },
-              {
-                inline_data: {
-                  mime_type: mimeType,
-                  data: audioBase64
-                }
-              }
-            ]
+            text:
+              "Transcribe this F-1 visa interview answer. The speaker may have an Indian accent and may mention universities, sponsors, I-20, SEVIS, visa, funding, courses, or US cities. Return only the corrected transcript in first person. Do not add explanations."
+          },
+          {
+            inline_data: {
+              mime_type: mimeType,
+              data: audioBase64
+            }
           }
-        ],
-        generationConfig: {
-          temperature: 0.1,
-          maxOutputTokens: 512
-        }
-      })
+        ]
+      }
+    ],
+    generationConfig: {
+      temperature: 0.1,
+      maxOutputTokens: 512
     }
-  );
+  });
 
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`Gemini transcription error ${response.status}: ${text.slice(0, 500)}`);
+  let lastError = "";
+  for (const model of GEMINI_TRANSCRIBE_MODELS) {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: requestBody
+      }
+    );
+
+    if (!response.ok) {
+      const text = await response.text();
+      lastError = `Gemini transcription error ${response.status} on ${model}: ${text.slice(0, 500)}`;
+      if ([400, 401, 403].includes(response.status)) continue;
+      if ([429, 503].includes(response.status)) continue;
+      throw new Error(lastError);
+    }
+
+    const json = await response.json();
+    const transcript = json.candidates?.[0]?.content?.parts?.map(part => part.text || "").join(" ").trim();
+    if (transcript) {
+      return {
+        transcript: transcript.replace(/^["']|["']$/g, "").trim(),
+        model
+      };
+    }
+
+    lastError = `Gemini could not hear a clear answer with ${model}.`;
   }
 
-  const json = await response.json();
-  const transcript = json.candidates?.[0]?.content?.parts?.map(part => part.text || "").join(" ").trim();
-  if (!transcript) {
-    throw new Error("Gemini could not hear a clear answer.");
-  }
-
-  return transcript.replace(/^["']|["']$/g, "").trim();
+  throw new Error(lastError || "Gemini could not transcribe the audio.");
 }
 
 const offlineQuestions = [
@@ -427,7 +447,8 @@ const server = http.createServer(async (req, res) => {
       ),
       listening: {
         configured: Boolean(GEMINI_API_KEY),
-        model: GEMINI_TRANSCRIBE_MODEL
+        model: GEMINI_TRANSCRIBE_MODELS[0],
+        fallbackModels: GEMINI_TRANSCRIBE_MODELS
       }
     });
     return;
@@ -437,8 +458,8 @@ const server = http.createServer(async (req, res) => {
     try {
       const body = await readBody(req);
       const payload = JSON.parse(body || "{}");
-      const transcript = await transcribeWithGemini(payload);
-      sendJson(res, 200, { transcript });
+      const result = await transcribeWithGemini(payload);
+      sendJson(res, 200, result);
     } catch (error) {
       sendJson(res, 500, {
         error: error.message || "Unexpected transcription error."

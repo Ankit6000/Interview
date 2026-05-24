@@ -31,8 +31,20 @@ let mediaStream = null;
 let audioChunks = [];
 let sendAfterTranscription = false;
 let interviewEnded = false;
+let interviewStarted = false;
 
-const welcome = "Good morning. I am Jelly. Please pass me your I-20 and passport. First question: why are you going to the United States?";
+const openingQuestions = [
+  "Good morning. Please pass me your passport and I-20. What is the purpose of your trip to the United States?",
+  "Hello. Which university are you going to, and why did you choose that program?",
+  "Good morning. Tell me briefly: why do you want to study in the United States now?",
+  "Please step forward. What program have you been admitted to, and why is it important for your career?",
+  "Good morning. Before we discuss documents, explain why you selected this university.",
+  "Hello. What are you planning to study in the United States, and who is sponsoring you?",
+  "Good morning. Give me a clear reason why this degree makes sense after your previous education.",
+  "Please hand me your I-20. What is your university, your course, and your intake?"
+];
+
+const idleMessage = "Fill the profile on the left, then click Start interview when you are ready.";
 
 function getProfile() {
   return Object.fromEntries(new FormData(profileForm).entries());
@@ -96,6 +108,11 @@ function updateProviderStatus() {
 }
 
 async function sendToJelly(text) {
+  if (!interviewStarted) {
+    addMessage("system", "Click Start interview first so Jelly can begin like a visa officer.");
+    return;
+  }
+
   if (interviewEnded) {
     addMessage("system", "This interview has ended. Reset to start a new one.");
     return;
@@ -145,6 +162,41 @@ async function sendToJelly(text) {
     setLoading(false);
     updateMetrics();
   }
+}
+
+function startInterview() {
+  if (interviewStarted && !interviewEnded) {
+    addMessage("system", "The interview is already running.");
+    return;
+  }
+
+  interviewStarted = true;
+  interviewEnded = false;
+  messages = [];
+  chat.innerHTML = "";
+  endInterviewButton.disabled = false;
+  const opening = pickOpeningQuestion();
+  messages.push({ role: "assistant", content: opening });
+  addMessage("assistant", opening);
+  updateMetrics();
+}
+
+function pickOpeningQuestion() {
+  const profile = getProfile();
+  const namedQuestions = [];
+
+  if (profile.university && profile.program) {
+    namedQuestions.push(`Good morning. I see you are going to ${profile.university} for ${profile.program}. Why did you choose this university?`);
+    namedQuestions.push(`Please pass me your I-20. What makes ${profile.program} at ${profile.university} the right next step for you?`);
+  }
+
+  if (profile.funding || profile.sponsor) {
+    namedQuestions.push("Good morning. Who is paying for your studies, and how will you prove the funds?");
+  }
+
+  const pool = [...namedQuestions, ...openingQuestions];
+  const randomIndex = Math.floor(Math.random() * pool.length);
+  return pool[randomIndex];
 }
 
 async function endInterview() {
@@ -490,12 +542,15 @@ function toggleSpeaking() {
 }
 
 function resetSession() {
+  window.speechSynthesis?.cancel();
+  stopListening("Mic ready");
+  interviewStarted = false;
   interviewEnded = false;
   endInterviewButton.disabled = false;
   endInterviewButton.textContent = "End interview";
-  messages = [{ role: "assistant", content: welcome }];
+  messages = [];
   chat.innerHTML = "";
-  addMessage("assistant", welcome);
+  addMessage("system", idleMessage);
   updateMetrics();
 }
 
@@ -536,6 +591,10 @@ testVoiceButton.addEventListener("click", () => {
 
 quickButtons.forEach(button => {
   button.addEventListener("click", () => {
+    if (button.dataset.action === "start") {
+      startInterview();
+      return;
+    }
     sendToJelly(button.dataset.prompt);
   });
 });

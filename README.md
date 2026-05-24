@@ -28,7 +28,7 @@ Or create a private `.env` file:
 OPENROUTER_API_KEY=your_key
 OPENROUTER_MODEL=nvidia/nemotron-3-super-120b-a12b:free
 GEMINI_API_KEY=your_google_ai_studio_key
-GEMINI_TRANSCRIBE_MODEL=gemini-2.5-flash
+GEMINI_TRANSCRIBE_MODELS=gemini-3.1-flash-lite-preview,gemini-2.5-flash-lite,gemini-2.5-flash
 ```
 
 Never put the API key inside `public/app.js`; anything in `public/` is visible to users.
@@ -51,6 +51,7 @@ Jelly uses your browser's built-in speech tools:
 - Click **Start AI listening** to record an answer and transcribe it with Gemini.
 - If `GEMINI_API_KEY` is missing, Jelly falls back to browser speech recognition.
 - AI listening works on `localhost` and on HTTPS deployments.
+- Use `GEMINI_TRANSCRIBE_MODELS` as a comma-separated fallback list. Jelly tries the first model, then falls back if a model is unavailable or quota-limited.
 
 DeepSeek and Grok are different providers. Use `DEEPSEEK_API_KEY` for official DeepSeek, or `XAI_API_KEY` for xAI/Grok.
 
