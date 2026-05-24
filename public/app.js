@@ -110,10 +110,16 @@ function updateProviderStatus() {
 
 function syncModelChoiceToProvider(provider) {
   const current = modelSelect.value;
-  if (provider === "groq" && !current.startsWith("qwen/") && !current.startsWith("llama-")) {
-    modelSelect.value = "qwen/qwen3-32b";
+  const isGroqModel =
+    current.startsWith("qwen/") ||
+    current.startsWith("llama-") ||
+    current === "deepseek-r1-distill-llama-70b" ||
+    current === "openai/gpt-oss-120b";
+
+  if (provider === "groq" && !isGroqModel) {
+    modelSelect.value = "deepseek-r1-distill-llama-70b";
   }
-  if (provider === "openrouter" && (current.startsWith("qwen/") || current.startsWith("llama-"))) {
+  if (provider === "openrouter" && isGroqModel) {
     modelSelect.value = "nvidia/nemotron-3-super-120b-a12b:free";
   }
 }

@@ -9,7 +9,7 @@ services:
       - key: GROQ_API_KEY
         sync: false
       - key: GROQ_MODEL
-        value: qwen/qwen3-32b
+        value: deepseek-r1-distill-llama-70b
       - key: OPENROUTER_API_KEY
         sync: false
       - key: OPENROUTER_MODEL

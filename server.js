@@ -20,7 +20,7 @@ const providerConfigs = {
   groq: {
     baseUrl: process.env.GROQ_BASE_URL || "https://api.groq.com/openai/v1/chat/completions",
     apiKey: process.env.GROQ_API_KEY,
-    model: process.env.GROQ_MODEL || "qwen/qwen3-32b",
+    model: process.env.GROQ_MODEL || "deepseek-r1-distill-llama-70b",
     headers: {}
   },
   openrouter: {

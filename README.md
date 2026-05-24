@@ -18,7 +18,7 @@ For AI responses, set one of these environment variables before running:
 
 ```powershell
 $env:GROQ_API_KEY="your_key"
-$env:GROQ_MODEL="qwen/qwen3-32b"
+$env:GROQ_MODEL="deepseek-r1-distill-llama-70b"
 npm start
 ```
 
@@ -26,7 +26,7 @@ Or create a private `.env` file:
 
 ```env
 GROQ_API_KEY=your_groq_key
-GROQ_MODEL=qwen/qwen3-32b
+GROQ_MODEL=deepseek-r1-distill-llama-70b
 OPENROUTER_API_KEY=your_key
 OPENROUTER_MODEL=nvidia/nemotron-3-super-120b-a12b:free
 GEMINI_API_KEY=your_google_ai_studio_key
@@ -39,11 +39,11 @@ OpenRouter free model availability changes. If `deepseek/deepseek-r1:free` is un
 
 Recommended free model order for this app:
 
-1. Groq `qwen/qwen3-32b`
-2. Groq `llama-3.3-70b-versatile`
-3. OpenRouter `nvidia/nemotron-3-super-120b-a12b:free`
-4. OpenRouter `deepseek/deepseek-r1:free`
-5. OpenRouter `openrouter/free`
+1. Groq `deepseek-r1-distill-llama-70b`
+2. Groq `openai/gpt-oss-120b`
+3. Groq `llama-3.3-70b-versatile`
+4. Groq `qwen/qwen3-32b`
+5. OpenRouter `nvidia/nemotron-3-super-120b-a12b:free`
 
 ## Voice Mode
 
