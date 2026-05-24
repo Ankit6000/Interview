@@ -144,8 +144,12 @@ Question style:
 - Do not reveal your scoring rubric, hidden reasoning, analysis, or labels like "Reason", "Static", "Cross-question", or "Rapid-fire" unless the student explicitly asks for feedback.
 - Do not put stage directions, explanations, or non-spoken notes in parentheses or markdown.
 - Do not guarantee approval or denial.
-- After every 5 student answers, provide a quick score out of 10, risks, and the next question.
+- Do not give scores, risk summaries, or overall feedback in the middle of the interview.
 - If the student asks for feedback, give specific improvements and a stronger sample answer.
+- Before moving to a new topic, ask at least one useful follow-up or cross-question inside the current topic when the student's answer is incomplete, vague, over-polished, or document-dependent.
+- For funding, verify sponsor occupation, income, bank balance, liquid funds, loan/savings split, first-year cost, second-year plan, and supporting documents before moving on.
+- For academics, verify specific course, prerequisite knowledge, project/background connection, why this university over alternatives, and why not study the same program at home before moving on.
+- For home ties and post-study plans, verify specific target roles, companies or sector, family/property/career ties, and what the student will do if offered US employment.
 
 Student profile:
 Name: ${profile.name || "Not provided"}
@@ -160,6 +164,35 @@ Career goal: ${profile.goal || "Not provided"}
 Prior education/work: ${profile.background || "Not provided"}
 
 Begin or continue the interview naturally.`;
+}
+
+function buildReviewPrompt(profile) {
+  return `You are Jelly, an F-1 visa interview coach. The interview has ended. Review the student's performance.
+
+Output a structured review with:
+1. Overall score out of 10.
+2. Approval-readiness verdict: Strong, Borderline, or Risky.
+3. Biggest strengths.
+4. Biggest risks.
+5. Answer-by-answer review. For each student answer, include:
+   - What worked.
+   - What was weak or risky.
+   - One stronger sample answer sentence in the student's voice.
+6. Top 5 next practice questions.
+
+Be direct and practical. Keep the full review under 900 words. Do not guarantee visa approval or denial.
+
+Student profile:
+Name: ${profile.name || "Not provided"}
+University: ${profile.university || "Not provided"}
+Program: ${profile.program || "Not provided"}
+Degree level: ${profile.degreeLevel || "Not provided"}
+Intake: ${profile.intake || "Not provided"}
+Funding source: ${profile.funding || "Not provided"}
+Sponsor: ${profile.sponsor || "Not provided"}
+Home country/city: ${profile.home || "Not provided"}
+Career goal: ${profile.goal || "Not provided"}
+Prior education/work: ${profile.background || "Not provided"}`;
 }
 
 async function callModel(payload) {
@@ -204,6 +237,42 @@ async function callModel(payload) {
     offline: false,
     message: json.choices?.[0]?.message?.content || "I could not generate the next question. Please try again."
   };
+}
+
+async function callReviewModel(payload) {
+  const providerName = payload.provider || "openrouter";
+  const config = providerConfigs[providerName];
+
+  if (!config?.apiKey) {
+    return makeOfflineReview(payload);
+  }
+
+  const response = await fetch(config.baseUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${config.apiKey}`,
+      ...config.headers
+    },
+    body: JSON.stringify({
+      model: payload.model || config.model,
+      temperature: 0.35,
+      max_tokens: 1800,
+      messages: [
+        { role: "system", content: buildReviewPrompt(payload.profile || {}) },
+        ...(payload.messages || []).slice(-28),
+        { role: "user", content: "End the interview now and provide the full review." }
+      ]
+    })
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Provider error ${response.status}: ${text.slice(0, 500)}`);
+  }
+
+  const json = await response.json();
+  return json.choices?.[0]?.message?.content || makeOfflineReview(payload);
 }
 
 async function transcribeWithGemini(payload) {
@@ -304,10 +373,6 @@ function makeOfflineResponse(payload) {
   const lastAnswer = [...messages].reverse().find(message => message.role === "user")?.content || "";
   const needsCross = lastAnswer.length < 80 || /\b(good|best|better|opportunity|future|dream|because|usa)\b/i.test(lastAnswer);
 
-  if (studentAnswers > 0 && studentAnswers % 5 === 0) {
-    return `Quick checkpoint: ${Math.max(5, Math.min(8, 10 - Math.floor(lastAnswer.length < 80 ? 2 : 0)))}/10. Main risk: your answers must be specific, document-backed, and connected to returning home. Next question: ${offlineQuestions[studentAnswers % offlineQuestions.length]}`;
-  }
-
   if (studentAnswers > 2 && studentAnswers % 4 === 0) {
     return rapidFireRounds[studentAnswers % rapidFireRounds.length];
   }
@@ -317,6 +382,35 @@ function makeOfflineResponse(payload) {
   }
 
   return offlineQuestions[studentAnswers % offlineQuestions.length];
+}
+
+function makeOfflineReview(payload) {
+  const answers = (payload.messages || []).filter(message => message.role === "user");
+  const answerCount = answers.length;
+  return `Overall score: ${answerCount >= 8 ? "7" : "6"}/10
+
+Verdict: ${answerCount >= 8 ? "Borderline to strong" : "Borderline"}
+
+Biggest strengths:
+- You completed ${answerCount} answer${answerCount === 1 ? "" : "s"}.
+- You are practicing under interview-style pressure.
+
+Biggest risks:
+- Some answers may need more specific documents, numbers, course names, and home-country plans.
+- Funding and return intent usually need precise, confident answers.
+
+Answer-by-answer review:
+${answers.map((answer, index) => `${index + 1}. "${answer.content}"
+What worked: You answered the question instead of avoiding it.
+What was weak or risky: Make sure this answer includes specific evidence, not only general intention.
+Stronger sample: I would answer with one clear reason, one supporting detail, and one document or concrete example.`).join("\n\n")}
+
+Top 5 next practice questions:
+1. Why this university over other admits?
+2. Who is funding you, and what documents prove the funds?
+3. What is your total first-year cost from the I-20?
+4. What exact job or sector will you target after returning home?
+5. What will you do if you receive a US job offer after graduation?`;
 }
 
 const server = http.createServer(async (req, res) => {
@@ -362,6 +456,20 @@ const server = http.createServer(async (req, res) => {
     } catch (error) {
       sendJson(res, 500, {
         error: error.message || "Unexpected server error."
+      });
+    }
+    return;
+  }
+
+  if (req.method === "POST" && req.url.startsWith("/api/review")) {
+    try {
+      const body = await readBody(req);
+      const payload = JSON.parse(body || "{}");
+      const review = await callReviewModel(payload);
+      sendJson(res, 200, { review });
+    } catch (error) {
+      sendJson(res, 500, {
+        error: error.message || "Unexpected review error."
       });
     }
     return;

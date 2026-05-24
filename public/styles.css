@@ -350,6 +350,17 @@ input[type="range"] {
   background: var(--accent-dark);
 }
 
+.end-chip {
+  color: #fff;
+  border-color: #7a241b;
+  background: var(--brick);
+}
+
+.end-chip:disabled {
+  cursor: wait;
+  opacity: 0.75;
+}
+
 .composer {
   display: grid;
   gap: 12px;

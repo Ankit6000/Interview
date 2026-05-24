@@ -11,6 +11,7 @@ const riskLevel = document.querySelector("#riskLevel");
 const resetButton = document.querySelector("#resetButton");
 const micButton = document.querySelector("#micButton");
 const speakToggle = document.querySelector("#speakToggle");
+const endInterviewButton = document.querySelector("#endInterviewButton");
 const voiceStatus = document.querySelector("#voiceStatus");
 const voiceSelect = document.querySelector("#voiceSelect");
 const voiceRate = document.querySelector("#voiceRate");
@@ -29,6 +30,7 @@ let mediaRecorder = null;
 let mediaStream = null;
 let audioChunks = [];
 let sendAfterTranscription = false;
+let interviewEnded = false;
 
 const welcome = "Good morning. I am Jelly. Please pass me your I-20 and passport. First question: why are you going to the United States?";
 
@@ -38,8 +40,9 @@ function getProfile() {
 
 function addMessage(role, content) {
   const message = document.createElement("div");
-  message.className = `message ${role === "assistant" ? "jelly" : role}`;
-  const label = role === "assistant" ? "Jelly" : role === "user" ? "Student" : "Note";
+  const isAssistant = role.startsWith("assistant");
+  message.className = `message ${isAssistant ? "jelly" : role}`;
+  const label = isAssistant ? "Jelly" : role === "user" ? "Student" : "Note";
   message.innerHTML = `<strong>${label}</strong>${escapeHtml(content)}`;
   chat.appendChild(message);
   chat.scrollTop = chat.scrollHeight;
@@ -93,6 +96,11 @@ function updateProviderStatus() {
 }
 
 async function sendToJelly(text) {
+  if (interviewEnded) {
+    addMessage("system", "This interview has ended. Reset to start a new one.");
+    return;
+  }
+
   const trimmed = text.trim();
   if (isListening) {
     stopListening("Transcribing", true);
@@ -136,6 +144,51 @@ async function sendToJelly(text) {
   } finally {
     setLoading(false);
     updateMetrics();
+  }
+}
+
+async function endInterview() {
+  if (interviewEnded) return;
+
+  const answerCount = messages.filter(message => message.role === "user").length;
+  if (answerCount === 0) {
+    addMessage("system", "Answer at least one question before ending the interview.");
+    return;
+  }
+
+  stopListening("Mic paused");
+  window.speechSynthesis?.cancel();
+  interviewEnded = true;
+  setLoading(true);
+  endInterviewButton.disabled = true;
+  endInterviewButton.textContent = "Reviewing";
+  addMessage("system", "Interview ended. Jelly is preparing your full review.");
+
+  try {
+    const response = await fetch("/api/review", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        provider: providerSelect.value,
+        model: modelSelect.value,
+        profile: getProfile(),
+        messages
+      })
+    });
+    const data = await response.json();
+    if (!response.ok || data.error) {
+      throw new Error(data.error || "Could not generate review.");
+    }
+
+    messages.push({ role: "assistant", content: data.review });
+    addMessage("assistant review", data.review);
+  } catch (error) {
+    addMessage("system", error.message);
+    interviewEnded = false;
+  } finally {
+    setLoading(false);
+    endInterviewButton.disabled = false;
+    endInterviewButton.textContent = "End interview";
   }
 }
 
@@ -437,6 +490,9 @@ function toggleSpeaking() {
 }
 
 function resetSession() {
+  interviewEnded = false;
+  endInterviewButton.disabled = false;
+  endInterviewButton.textContent = "End interview";
   messages = [{ role: "assistant", content: welcome }];
   chat.innerHTML = "";
   addMessage("assistant", welcome);
@@ -470,6 +526,7 @@ modelSelect.addEventListener("change", updateProviderStatus);
 resetButton.addEventListener("click", resetSession);
 micButton.addEventListener("click", toggleListening);
 speakToggle.addEventListener("click", toggleSpeaking);
+endInterviewButton.addEventListener("click", endInterview);
 voiceSelect.addEventListener("change", saveVoiceSettings);
 voiceRate.addEventListener("input", saveVoiceSettings);
 voicePitch.addEventListener("input", saveVoiceSettings);
